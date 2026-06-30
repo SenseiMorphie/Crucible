@@ -577,7 +577,7 @@ def page_new_sim():
                 idx += 1
             else:
                 prog.progress(96, "Saving report and building Q&A index...")
-            time.sleep(5)
+            time.sleep(0.5)
 
         prog.progress(100, "Complete.")
         time.sleep(0.8)
