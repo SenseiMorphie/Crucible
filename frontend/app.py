@@ -7,7 +7,8 @@ import requests
 import plotly.graph_objects as go
 import streamlit as st
 
-API = "http://localhost:8000"
+import os
+API = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 st.set_page_config(
     page_title="Startup Simulator",
@@ -30,12 +31,12 @@ st.markdown("""<style>
 .rc-orange{background:#160900;border:1px solid #9a3412;border-radius:10px;padding:16px 18px;margin-bottom:10px}
 .rc-purple{background:#0f0a1e;border:1px solid #4c1d95;border-radius:10px;padding:16px 18px;margin-bottom:10px}
 
-.rl{font-size:10px;font-weight:700;letter-spacing:1.8px;color:#4b5563;text-transform:uppercase;margin-bottom:6px}
-.rl-blue{font-size:10px;font-weight:700;letter-spacing:1.8px;color:#818cf8;text-transform:uppercase;margin-bottom:6px}
-.rl-green{font-size:10px;font-weight:700;letter-spacing:1.8px;color:#34d399;text-transform:uppercase;margin-bottom:6px}
-.rl-orange{font-size:10px;font-weight:700;letter-spacing:1.8px;color:#fb923c;text-transform:uppercase;margin-bottom:6px}
-.rl-purple{font-size:10px;font-weight:700;letter-spacing:1.8px;color:#c084fc;text-transform:uppercase;margin-bottom:6px}
-.rv{font-size:13px;color:#d1d5db;line-height:1.75}
+.rl{font-size:11px;font-weight:800;letter-spacing:1.8px;color:#9ca3af;text-transform:uppercase;margin-bottom:7px}
+.rl-blue{font-size:11px;font-weight:800;letter-spacing:1.8px;color:#a5b4fc;text-transform:uppercase;margin-bottom:7px}
+.rl-green{font-size:11px;font-weight:800;letter-spacing:1.8px;color:#6ee7b7;text-transform:uppercase;margin-bottom:7px}
+.rl-orange{font-size:11px;font-weight:800;letter-spacing:1.8px;color:#fdba74;text-transform:uppercase;margin-bottom:7px}
+.rl-purple{font-size:11px;font-weight:800;letter-spacing:1.8px;color:#d8b4fe;text-transform:uppercase;margin-bottom:7px}
+.rv{font-size:13px;color:#f3f4f6;line-height:1.75}
 
 .rb-p{display:inline-block;background:#064e3b;color:#6ee7b7;border:1px solid #059669;padding:4px 16px;border-radius:5px;font-size:11px;font-weight:700;letter-spacing:1px}
 .rb-v{display:inline-block;background:#451a03;color:#fcd34d;border:1px solid #d97706;padding:4px 16px;border-radius:5px;font-size:11px;font-weight:700;letter-spacing:1px}
@@ -71,8 +72,7 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 # ── Session ────────────────────────────────────────────────────────────────────
-for k, v in [("page","dashboard"),("sim_id",None),("chat",[]),("chat_loaded",False),
-             ("pdf_bytes",None),("pdf_ready",False)]:
+for k, v in [("page","dashboard"),("sim_id",None),("chat",[]),("chat_loaded",False)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -121,13 +121,11 @@ def _delete(path):
 
 def _pdf(sid):
     try:
-        r = requests.get(f"{API}/report/{sid}/pdf", timeout=120)
-        if r.status_code != 200:
-            st.error(f"PDF error {r.status_code}: {r.text[:300]}")
-            return None
+        r = requests.get(f"{API}/report/{sid}/pdf", timeout=60)
+        r.raise_for_status()
         return r.content
     except Exception as e:
-        st.error(f"PDF fetch failed: {e}")
+        st.warning(f"PDF unavailable: {e}")
         return None
 
 def _load_chat(sid):
@@ -178,10 +176,10 @@ def bullets(label, items, style=""):
         f'{rows}</div>',
         unsafe_allow_html=True)
 
-def sec(title, color="#4b5563"):
+def sec(title, color="#9ca3af"):
     st.markdown(
         f'<div style="display:flex;align-items:center;gap:10px;margin:20px 0 14px 0">'
-        f'<span style="font-size:10px;font-weight:700;letter-spacing:2px;color:{color};'
+        f'<span style="font-size:11px;font-weight:800;letter-spacing:2px;color:{color};'
         f'text-transform:uppercase;white-space:nowrap">{title}</span>'
         f'<div style="flex:1;height:1px;background:#1c1c21"></div></div>',
         unsafe_allow_html=True)
@@ -194,7 +192,7 @@ def explain(text):
 
 def sub(text):
     st.markdown(
-        f'<p style="color:#6b7280;font-size:13px;line-height:1.7;margin-bottom:16px">{text}</p>',
+        f'<p style="color:#9ca3af;font-size:13px;line-height:1.7;margin-bottom:16px">{text}</p>',
         unsafe_allow_html=True)
 
 def divider():
@@ -426,8 +424,7 @@ with st.sidebar:
             st.button(lbl, key=f"sb_{s['id']}", use_container_width=True,
                       on_click=lambda sid=s["id"]: (
                           st.session_state.update(
-                              sim_id=sid, page="results", chat_loaded=False,
-                              pdf_bytes=None, pdf_ready=False)))
+                              sim_id=sid, page="results", chat_loaded=False)))
 
     st.markdown(
         '<div style="font-size:10px;color:#1f2937;margin-top:20px;line-height:1.6">'
@@ -543,32 +540,58 @@ def page_new_sim():
                  (81,"Failure agent — researching failed similar startups..."),
                  (93,"Judge agent — computing final verdict...")]
         prog = st.progress(0,"Initialising...")
-        result = {"d":None,"done":False}
+        result = {"d": None, "done": False, "error": None}
 
         def _run():
-            result["d"] = _post("/simulate",{"idea":idea.strip()})
-            result["done"] = True
+            # Must NOT call st.error() from a background thread — Streamlit is
+            # not thread-safe.  Use raw requests here; show errors in main thread.
+            try:
+                r = requests.post(
+                    f"{API}/simulate",
+                    json={"idea": idea.strip()},
+                    timeout=360,
+                )
+                r.raise_for_status()
+                result["d"] = r.json()
+            except requests.ConnectionError:
+                result["error"] = "Backend offline. Make sure uvicorn is running."
+            except requests.HTTPError as e:
+                try:
+                    result["error"] = e.response.json().get("detail", str(e))
+                except Exception:
+                    result["error"] = str(e)
+            except Exception as e:
+                result["error"] = str(e)
+            finally:
+                result["done"] = True
 
-        threading.Thread(target=_run,daemon=True).start()
+        threading.Thread(target=_run, daemon=True).start()
+
+        # Keep looping until backend thread finishes.
+        # 5s sleep = more responsive than 15s, and we never exit early.
         idx = 0
         while not result["done"]:
-            if idx < len(steps): p,msg=steps[idx]; prog.progress(p,msg); idx+=1
-            time.sleep(15)
+            if idx < len(steps):
+                p, msg = steps[idx]
+                prog.progress(p, msg)
+                idx += 1
+            else:
+                prog.progress(96, "Saving report and building Q&A index...")
+            time.sleep(5)
 
-        prog.progress(100,"Complete.")
-        time.sleep(0.4)
+        prog.progress(100, "Complete.")
+        time.sleep(0.8)
+
         r = result["d"]
         if r and r.get("simulation_id"):
             sid = r["simulation_id"]
-            st.session_state.sim_id = sid
-            st.success(f"Simulation complete. ID: {sid}")
-            c1,c2 = st.columns(2)
-            with c1:
-                if st.button("View Full Report",use_container_width=True):
-                    st.session_state.page="results"; st.session_state.chat_loaded=False; st.rerun()
-            with c2:
-                if st.button("Open Q&A",use_container_width=True):
-                    st.session_state.page="qa"; st.session_state.chat_loaded=False; st.rerun()
+            st.session_state.sim_id      = sid
+            st.session_state.page        = "results"
+            st.session_state.chat_loaded = False
+            st.rerun()
+        else:
+            err = result.get("error") or "No report was returned."
+            st.error(f"Simulation failed: {err}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -601,16 +624,14 @@ def page_results():
     # Actions
     a1,a2,a3 = st.columns(3)
     with a1:
-     safe = data.get("idea","report")[:30].replace(" ","_")
-     st.markdown(
-        f'<a href="http://localhost:8000/report/{sid}/pdf" '
-        f'download="report_{safe}.pdf" target="_blank" style="text-decoration:none">'
-        f'<div style="width:100%;padding:8px 14px;background:#064e3b;color:#6ee7b7;'
-        f'border:1px solid #059669;border-radius:7px;cursor:pointer;font-size:12px;'
-        f'font-weight:500;font-family:inherit;text-align:center;box-sizing:border-box">'
-        f'&#11015; Download PDF Report</div></a>',
-        unsafe_allow_html=True
-    )
+        safe = data.get("idea","report")[:30].replace(" ","_").replace("/","")
+        st.markdown(
+            f'<a href="{API}/report/{sid}/pdf" download="startup_report_{safe}.pdf" '
+            f'style="display:block;background:#064e3b;color:#6ee7b7;border:1px solid #059669;'
+            f'border-radius:7px;font-size:12px;font-weight:600;padding:9px 14px;'
+            f'text-align:center;text-decoration:none;width:100%;box-sizing:border-box">'
+            f'Download PDF Report</a>',
+            unsafe_allow_html=True)
     with a2:
         if st.button("Open Q&A",use_container_width=True):
             st.session_state.page="qa"; st.session_state.chat_loaded=False; st.rerun()
