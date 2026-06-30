@@ -6,13 +6,13 @@ echo "║         🚀 Startup Simulator           ║"
 echo "╚════════════════════════════════════════╝"
 echo ""
 
-# Check .env exists
-if [ ! -f ".env" ]; then
-    echo "⚠️  No .env file found. Copying from .env.example..."
-    cp .env.example .env
-    echo "✏️  Please edit .env and add your API key, then re-run this script."
-    exit 1
-fi
+# # Check .env exists
+# if [ ! -f ".env" ]; then
+#     echo "⚠️  No .env file found. Copying from .env.example..."
+#     cp .env.example .env
+#     echo "✏️  Please edit .env and add your API key, then re-run this script."
+#     exit 1
+# fi
 
 echo "Starting FastAPI backend on http://localhost:8000 ..."
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000 &
