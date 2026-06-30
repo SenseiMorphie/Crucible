@@ -1,0 +1,8 @@
+.env
+venv/
+__pycache__/
+*.pyc
+data/simulations/*.json
+data/chroma_db/
+data/faiss/
+data/simulations/chats/*.json
