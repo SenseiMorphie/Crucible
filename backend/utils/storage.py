@@ -1,29 +1,43 @@
+"""
+backend/utils/storage.py  —  MongoDB backend
+"""
 from __future__ import annotations
-import json
+import os
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
-from backend.config import SIMULATIONS_DIR
 
-_ROOT   = Path(SIMULATIONS_DIR)
-_CHATS  = _ROOT / "chats"
-_CHATS.mkdir(parents=True, exist_ok=True)
+from pymongo import MongoClient, DESCENDING
+from pymongo.collection import Collection
+from pymongo.errors import PyMongoError
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-def _idx():       return _ROOT / "_index.json"
-def _rpt(sid):    return _ROOT / f"{sid}.json"
-def _chat(sid):   return _CHATS / f"{sid}.json"
+# ── connection ────────────────────────────────────────────────────────────────
+_URI = os.environ.get("MONGO_URI", "")
+_DB  = os.environ.get("MONGO_DB",  "startup_simulator")
 
-def _load_idx():
-    p = _idx()
-    if p.exists():
-        try: return json.loads(p.read_text(encoding="utf-8"))
-        except: return []
-    return []
+if not _URI:
+    raise EnvironmentError(
+        "MONGO_URI is not set. Add it to your .env file."
+    )
 
-def _save_idx(idx):
-    _idx().write_text(json.dumps(idx, indent=2, default=str), encoding="utf-8")
+_client: MongoClient = MongoClient(_URI)
+_db = _client[_DB]
+
+_sims:  Collection = _db["simulations"]
+_idx:   Collection = _db["sim_index"]
+_chats: Collection = _db["chats"]
+
+_sims.create_index("id",  unique=True)
+_idx.create_index("id",   unique=True)
+_idx.create_index([("timestamp", DESCENDING)])
+_chats.create_index("sim_id", unique=True)
+
+
+# ── internal helper ───────────────────────────────────────────────────────────
+def _strip(doc: dict) -> dict:
+    if doc and "_id" in doc:
+        doc.pop("_id")
+    return doc
 
 
 # ── simulation ────────────────────────────────────────────────────────────────
@@ -33,52 +47,71 @@ def save_simulation(sim_id: str, idea: str, state: dict) -> None:
     report = {
         "id": sim_id, "idea": idea, "timestamp": ts, "status": "completed",
         "founder":      state.get("founder",      {}),
-        "market":       state.get("market",        {}),
-        "competitor":   state.get("competitor",    {}),
-        "customer":     state.get("customer",      {}),
-        "investor":     state.get("investor",      {}),
-        "failure":      state.get("failure",       {}),
-        "india_policy": state.get("india_policy",  {}),
+        "market":       state.get("market",       {}),
+        "competitor":   state.get("competitor",   {}),
+        "customer":     state.get("customer",     {}),
+        "investor":     state.get("investor",     {}),
+        "failure":      state.get("failure",      {}),
+        "india_policy": state.get("india_policy", {}),
         "judge":        judge,
     }
-    _rpt(sim_id).write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-    idx = [e for e in _load_idx() if e.get("id") != sim_id]
-    idx.insert(0, {"id": sim_id, "idea": idea, "timestamp": ts,
-                   "final_score": judge.get("final_score", 0),
-                   "verdict":     judge.get("verdict", "Unknown")})
-    _save_idx(idx)
+    _sims.replace_one({"id": sim_id}, report, upsert=True)
+    _idx.replace_one({"id": sim_id}, {
+        "id": sim_id, "idea": idea, "timestamp": ts,
+        "final_score": judge.get("final_score", 0),
+        "verdict":     judge.get("verdict", "Unknown"),
+    }, upsert=True)
 
 
 def load_simulation(sim_id: str) -> Optional[dict]:
-    p = _rpt(sim_id)
-    if not p.exists(): return None
-    try: return json.loads(p.read_text(encoding="utf-8"))
-    except: return None
+    try:
+        doc = _sims.find_one({"id": sim_id})
+        return _strip(doc) if doc else None
+    except PyMongoError as e:
+        print(f"[MongoDB] load_simulation error: {e}")
+        return None
 
 
 def list_simulations() -> list:
-    return _load_idx()
+    try:
+        return list(_idx.find({}, {"_id": 0}).sort("timestamp", DESCENDING))
+    except PyMongoError as e:
+        print(f"[MongoDB] list_simulations error: {e}")
+        return []
 
 
 def delete_simulation(sim_id: str) -> None:
-    p = _rpt(sim_id)
-    if p.exists(): p.unlink()
-    _save_idx([e for e in _load_idx() if e.get("id") != sim_id])
-    delete_chat(sim_id)
+    try:
+        _sims.delete_one({"id": sim_id})
+        _idx.delete_one({"id": sim_id})
+        delete_chat(sim_id)
+    except PyMongoError as e:
+        print(f"[MongoDB] delete_simulation error: {e}")
 
 
-# ── chat persistence ──────────────────────────────────────────────────────────
+# ── chat ──────────────────────────────────────────────────────────────────────
 def save_chat(sim_id: str, messages: list) -> None:
-    _chat(sim_id).write_text(json.dumps(messages, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        _chats.replace_one(
+            {"sim_id": sim_id},
+            {"sim_id": sim_id, "messages": messages},
+            upsert=True,
+        )
+    except PyMongoError as e:
+        print(f"[MongoDB] save_chat error: {e}")
 
 
 def load_chat(sim_id: str) -> list:
-    p = _chat(sim_id)
-    if not p.exists(): return []
-    try: return json.loads(p.read_text(encoding="utf-8"))
-    except: return []
+    try:
+        doc = _chats.find_one({"sim_id": sim_id})
+        return doc["messages"] if doc else []
+    except PyMongoError as e:
+        print(f"[MongoDB] load_chat error: {e}")
+        return []
 
 
 def delete_chat(sim_id: str) -> None:
-    p = _chat(sim_id)
-    if p.exists(): p.unlink()
+    try:
+        _chats.delete_one({"sim_id": sim_id})
+    except PyMongoError as e:
+        print(f"[MongoDB] delete_chat error: {e}")

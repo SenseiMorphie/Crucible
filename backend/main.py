@@ -21,12 +21,12 @@ app.include_router(router)
 async def on_startup():
     print("\n" + "="*60)
     print("  🚀  Startup Simulator API v2.0")
-    print(f"  LLM  : {cfg.LLM_PROVIDER} / {cfg.OPENROUTER_MODEL if cfg.LLM_PROVIDER=='openrouter' else cfg.OLLAMA_MODEL}")
+    print(f"  LLM  : {cfg.LLM_PROVIDER} / {cfg.OPENROUTER_MODEL if cfg.LLM_PROVIDER == 'openrouter' else cfg.OLLAMA_MODEL}")
     print(f"  Search: {'enabled ✅' if cfg.USE_WEB_SEARCH else 'disabled ❌'}")
-    ls = cfg.LANGSMITH_TRACING.lower() == "true" and bool(cfg.LANGSMITH_API_KEY)
-    print(f"  LangSmith: {'enabled ✅  → https://smith.langchain.com' if ls else 'disabled (set LANGSMITH_TRACING=true in .env)'}")
+    ls = getattr(cfg, 'LANGSMITH_TRACING', '').lower() == "true" and bool(getattr(cfg, 'LANGSMITH_API_KEY', ''))
+    print(f"  LangSmith: {'enabled ✅' if ls else 'disabled'}")
+    print(f"  Storage: MongoDB ✅")
     print("  Docs : http://localhost:8000/docs")
-    print("  Test LLM: http://localhost:8000/test-llm")
     print("="*60)
 
     # Quick LLM connectivity test

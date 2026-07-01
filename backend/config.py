@@ -25,6 +25,13 @@ FAISS_DIR       = DATA_DIR / "faiss"
 for d in [SIMULATIONS_DIR, DATA_DIR / "chroma_db", FAISS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
+# ── MongoDB ───────────────────────────────────────────────────────────────────
+# If MONGO_URI is set, simulations + chat history are stored in MongoDB instead
+# of local JSON files. If unset, falls back to local JSON storage automatically.
+MONGO_URI     = os.getenv("MONGO_URI", "")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "crucible")
+USE_MONGODB   = bool(MONGO_URI.strip())
+
 # ── LangSmith ─────────────────────────────────────────────────────────────────
 LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "false")
 LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
